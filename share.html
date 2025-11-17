@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Share Gallery - Saree Availability</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1><a href="index.html">Saree Availability Gallery</a></h1>
+            <p style="color: rgba(255,255,255,0.9); margin-top:5px;">Shareable view of available sarees</p>
+        </div>
+    </header>
+
+    <main class="container">
+        <div class="breadcrumb">
+            <a href="index.html">Home</a> >
+            <span id="category-name">Category</span> >
+            <span id="day-name">Day</span>
+        </div>
+
+        <div class="filter-section" style="gap:10px; align-items:flex-start; flex-wrap:wrap;">
+            <div>
+                <strong>Share this gallery:</strong>
+                <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
+                    <button id="copy-link" class="btn-secondary">Copy Link</button>
+                    <button id="share-link" class="btn-primary">Share Link</button>
+                </div>
+                <p id="share-feedback" style="margin-top:10px; color:#667eea;"></p>
+            </div>
+            <div>
+                <strong>Share available images:</strong>
+                <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
+                    <button id="share-images" class="btn-secondary" disabled>Share Images</button>
+                    <button id="download-images" class="btn-primary" disabled>Download ZIP</button>
+                </div>
+                <p style="max-width:400px;">Use these options to send the actual pictures of all available boxes for the selected category and day.</p>
+            </div>
+            <div>
+                <strong>Note:</strong>
+                <p style="max-width:400px;">This gallery shows only the sarees marked as <em>Available</em> for the selected category and day.</p>
+            </div>
+        </div>
+
+        <div id="share-products" class="products-grid">
+            <p class="info-message">Preparing gallery...</p>
+        </div>
+    </main>
+
+    <script src="js/data.js"></script>
+    <script src="js/main.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" integrity="sha512-k9i8ZUBKbjDg7sWXBJgp7wa9u0edPFpKnzGWx/89ZbduCMsZ/HXXIQK5vCk1vZ1tcHTul3e8DqRL3yf2bsyK4g==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script>
+        let categoryId = null;
+        let subcategoryId = null;
+        let availableProductsCache = [];
+
+        document.addEventListener('DOMContentLoaded', function() {
+            const urlParams = new URLSearchParams(window.location.search);
+            categoryId = parseInt(urlParams.get('category_id'));
+            subcategoryId = parseInt(urlParams.get('subcategory_id'));
+
+            if (!categoryId || !subcategoryId) {
+                document.getElementById('share-products').innerHTML = '<p class="error">Invalid share link. Please select a category and day from the products page.</p>';
+                return;
+            }
+
+            renderGallery();
+
+            document.getElementById('copy-link').addEventListener('click', copyShareLink);
+            document.getElementById('share-link').addEventListener('click', shareLink);
+            document.getElementById('share-images').addEventListener('click', shareImages);
+            document.getElementById('download-images').addEventListener('click', downloadImagesZip);
+        });
+
+        function renderGallery() {
+            const categories = getCategories();
+            const category = categories.find(c => c.id == categoryId);
+            if (category) {
+                document.getElementById('category-name').textContent = category.name;
+            }
+
+            const subcategories = getSubcategories(categoryId);
+            const currentSub = subcategories.find(s => s.id == subcategoryId);
+            if (currentSub) {
+                document.getElementById('day-name').textContent = 'Day ' + currentSub.day_number;
+            }
+
+            const container = document.getElementById('share-products');
+            container.innerHTML = '<p class="loading">Loading available products...</p>';
+
+            setTimeout(() => {
+                const products = getProducts(subcategoryId).filter(p => p.availability_status === 'available');
+                availableProductsCache = products;
+                updateMediaButtonsState();
+
+                if (products.length === 0) {
+                    container.innerHTML = '<p class="info-message">No available products to share for this day.</p>';
+                    availableProductsCache = [];
+                    updateMediaButtonsState();
+                    return;
+                }
+
+                container.innerHTML = '';
+                products.forEach(product => {
+                    const card = document.createElement('div');
+                    card.className = 'product-card';
+                    card.innerHTML = `
+                        <div class="product-image">
+                            <img src="${product.image_path}" alt="Product ${product.product_number}" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22200%22%3E%3Crect fill=%22%23ddd%22 width=%22200%22 height=%22200%22/%3E%3Ctext fill=%22%23999%22 font-family=%22sans-serif%22 font-size=%2214%22 dy=%2210.5%22 font-weight=%22bold%22 x=%2250%25%22 y=%2250%25%22 text-anchor=%22middle%22%3ENo Image%3C/text%3E%3C/svg%3E'">
+                        </div>
+                        <div class="product-number">#${product.product_number}</div>
+                    `;
+                    container.appendChild(card);
+                });
+            }, 100);
+        }
+
+        function updateMediaButtonsState() {
+            const hasProducts = availableProductsCache.length > 0;
+            document.getElementById('share-images').disabled = !hasProducts;
+            document.getElementById('download-images').disabled = !hasProducts;
+        }
+
+        function getShareUrl() {
+            return window.location.href.split('#')[0];
+        }
+
+        function copyShareLink() {
+            const link = getShareUrl();
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(link)
+                    .then(() => showShareFeedback('Link copied to clipboard!'))
+                    .catch(() => fallbackCopy(link));
+            } else {
+                fallbackCopy(link);
+            }
+        }
+
+        function fallbackCopy(text) {
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            document.body.appendChild(textarea);
+            textarea.select();
+            try {
+                document.execCommand('copy');
+                showShareFeedback('Link copied to clipboard!');
+            } catch (err) {
+                alert('Copy this link to share:\n' + text);
+            }
+            document.body.removeChild(textarea);
+        }
+
+        function shareLink() {
+            const link = getShareUrl();
+            const categoryName = document.getElementById('category-name').textContent;
+            const dayName = document.getElementById('day-name').textContent;
+
+            if (navigator.share) {
+                navigator.share({
+                    title: 'Saree Availability',
+                    text: `Available sarees for ${categoryName} - ${dayName}`,
+                    url: link
+                }).catch(err => {
+                    console.warn('Share failed:', err);
+                });
+            } else {
+                copyShareLink();
+            }
+        }
+
+        async function shareImages() {
+            if (!availableProductsCache.length) {
+                showShareFeedback('No available images to share right now.');
+                return;
+            }
+
+            try {
+                const files = (await Promise.all(availableProductsCache.map(product => buildImageFile(product))))
+                    .filter(Boolean);
+
+                if (!files.length) {
+                    showShareFeedback('Unable to prepare images for sharing.');
+                    return;
+                }
+
+                if (navigator.canShare && navigator.canShare({ files })) {
+                    const categoryName = document.getElementById('category-name').textContent;
+                    const dayName = document.getElementById('day-name').textContent;
+                    await navigator.share({
+                        title: 'Available Saree Boxes',
+                        text: `Available boxes for ${categoryName} - ${dayName}`,
+                        files
+                    });
+                } else {
+                    showShareFeedback('Sharing images is not supported on this device. Try Download ZIP instead.');
+                }
+            } catch (error) {
+                console.error('Image sharing failed:', error);
+                showShareFeedback('Unable to share images. Please try again.');
+            }
+        }
+
+        async function downloadImagesZip() {
+            if (!availableProductsCache.length) {
+                showShareFeedback('No available images to download right now.');
+                return;
+            }
+
+            if (typeof JSZip === 'undefined') {
+                showShareFeedback('Download tool not loaded yet. Please retry in a moment.');
+                return;
+            }
+
+            try {
+                const zip = new JSZip();
+                const folder = zip.folder('available-boxes');
+
+                await Promise.all(availableProductsCache.map(async product => {
+                    const fileData = await buildImageArrayBuffer(product);
+                    if (!fileData) return;
+                    const { buffer, extension } = fileData;
+                    folder.file(`box-${product.product_number}.${extension}`, buffer);
+                }));
+
+                const zipBlob = await zip.generateAsync({ type: 'blob' });
+                const url = URL.createObjectURL(zipBlob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `available-boxes-category-${categoryId}-day-${subcategoryId}.zip`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                setTimeout(() => URL.revokeObjectURL(url), 5000);
+                showShareFeedback('ZIP download started.');
+            } catch (error) {
+                console.error('ZIP download failed:', error);
+                showShareFeedback('Unable to download images. Please try again.');
+            }
+        }
+
+        async function buildImageFile(product) {
+            const blob = await fetchImageBlob(product.image_path);
+            if (!blob) return null;
+            const extension = detectExtension(product.image_path, blob.type);
+            const fileName = `box-${product.product_number}.${extension}`;
+            return new File([blob], fileName, { type: blob.type || 'image/jpeg' });
+        }
+
+        async function buildImageArrayBuffer(product) {
+            const blob = await fetchImageBlob(product.image_path);
+            if (!blob) return null;
+            const extension = detectExtension(product.image_path, blob.type);
+            const buffer = await blob.arrayBuffer();
+            return { buffer, extension };
+        }
+
+        async function fetchImageBlob(path) {
+            try {
+                const response = await fetch(path);
+                if (!response.ok) throw new Error('Failed to fetch image');
+                return await response.blob();
+            } catch (error) {
+                console.warn('Unable to fetch image:', path, error);
+                return null;
+            }
+        }
+
+        function detectExtension(path, mimeType = '') {
+            if (path && path.startsWith('data:')) {
+                if (path.includes('image/png')) return 'png';
+                if (path.includes('image/webp')) return 'webp';
+                if (path.includes('image/gif')) return 'gif';
+                return 'jpg';
+            }
+
+            try {
+                const url = new URL(path, window.location.href);
+                const pathname = url.pathname;
+                const match = pathname.match(/\.([a-zA-Z0-9]+)$/);
+                if (match && match[1]) {
+                    return match[1].toLowerCase();
+                }
+            } catch (error) {
+                console.warn('Unable to parse image path for extension:', path);
+            }
+
+            if (mimeType.includes('png')) return 'png';
+            if (mimeType.includes('webp')) return 'webp';
+            if (mimeType.includes('gif')) return 'gif';
+            return 'jpg';
+        }
+
+        function showShareFeedback(message) {
+            const feedback = document.getElementById('share-feedback');
+            feedback.textContent = message;
+            setTimeout(() => {
+                feedback.textContent = '';
+            }, 3000);
+        }
+    </script>
+</body>
+</html>
+
